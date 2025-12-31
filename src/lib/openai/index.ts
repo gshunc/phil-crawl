@@ -7,10 +7,21 @@
 
 import OpenAI from "openai";
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Lazy initialization of OpenAI client
+let openai: OpenAI | null = null;
+
+function getOpenAI(): OpenAI {
+  if (!openai) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "OPENAI_API_KEY environment variable is required. Add it to .env.local"
+      );
+    }
+    openai = new OpenAI({ apiKey });
+  }
+  return openai;
+}
 
 /**
  * Generate a 1536-dimensional embedding vector for the given text.
@@ -23,7 +34,7 @@ export async function generateEmbedding(
   text: string
 ): Promise<number[] | null> {
   try {
-    const response = await openai.embeddings.create({
+    const response = await getOpenAI().embeddings.create({
       model: "text-embedding-3-small",
       input: text,
       encoding_format: "float",
@@ -64,7 +75,7 @@ export async function generateEmbeddings(
   if (texts.length === 0) return [];
 
   try {
-    const response = await openai.embeddings.create({
+    const response = await getOpenAI().embeddings.create({
       model: "text-embedding-3-small",
       input: texts,
       encoding_format: "float",

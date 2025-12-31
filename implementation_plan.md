@@ -103,7 +103,7 @@ generateSocraticQuestion(concept: Concept, history?: Message[]): Promise<string>
 generateSocraticResponse(concept: Concept, history: Message[], answer: string): Promise<{ response: string; nextQuestion?: string }>
 generateExpandedDescription(concept: Concept): Promise<string>
 generateQuizQuestion(category: string, subtopic: string, priorAnswers?: Answer[]): Promise<Question>
-evaluateQuizResult(answers: Answer[]): Promise<'beginner' | 'intermediate' | 'advanced'>
+evaluateQuizResult(answers: Answer[]): QuizEvaluationGeneration  // Algorithmic, not LLM-based
 ```
 
 ### A.4 OpenAI Embeddings ([src/lib/openai/index.ts](src/lib/openai/index.ts))

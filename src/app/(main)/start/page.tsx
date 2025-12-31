@@ -1,8 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks";
+
+interface RecommendedConcept {
+  slug: string;
+  name: string;
+  description: string;
+}
 
 /**
  * Start Page
@@ -16,35 +22,36 @@ export default function StartPage() {
   const { profile } = useAuth();
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
+  const [recommendedConcepts, setRecommendedConcepts] = useState<
+    RecommendedConcept[]
+  >([]);
+  const [recommendedLevel, setRecommendedLevel] = useState<string>("beginner");
+  const [loading, setLoading] = useState(true);
 
-  // Placeholder recommended concepts (will be dynamic based on profile)
-  const recommendedConcepts = [
-    {
-      name: "Virtue Ethics",
-      slug: "virtue-ethics",
-      description: "Aristotelian approach to morality based on character",
-    },
-    {
-      name: "Existentialism",
-      slug: "existentialism",
-      description: "Philosophy emphasizing individual freedom and choice",
-    },
-    {
-      name: "Epistemology",
-      slug: "epistemology",
-      description: "The study of knowledge, belief, and justification",
-    },
-    {
-      name: "Stoicism",
-      slug: "stoicism",
-      description: "Ancient philosophy focused on virtue and resilience",
-    },
-  ];
+  // Fetch personalized recommendations
+  useEffect(() => {
+    async function fetchRecommendations() {
+      try {
+        const response = await fetch("/api/onboarding/recommendations");
+        if (response.ok) {
+          const data = await response.json();
+          setRecommendedConcepts(data.concepts);
+          setRecommendedLevel(data.level);
+        }
+      } catch (error) {
+        console.error("Error fetching recommendations:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchRecommendations();
+  }, []);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
-      // Will implement search in Phase 3
+      // Navigate to explore page with the search query as slug
       router.push(`/explore/${searchQuery.toLowerCase().replace(/\s+/g, "-")}`);
     }
   };
@@ -53,8 +60,14 @@ export default function StartPage() {
     router.push(`/explore/${slug}`);
   };
 
+  const levelLabels: Record<string, string> = {
+    beginner: "Great starting points",
+    intermediate: "Intermediate topics for you",
+    advanced: "Advanced topics to explore",
+  };
+
   return (
-    <div className="max-w-4xl mx-auto py-8">
+    <div className="max-w-4xl mx-auto py-8 px-4">
       {/* Header */}
       <div className="text-center mb-12">
         <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100 mb-4">
@@ -67,6 +80,7 @@ export default function StartPage() {
         {profile && (
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
             {profile.nodes_explored || 0} nodes explored
+            {profile.graph_unlocked && " - Graph view unlocked!"}
           </p>
         )}
       </div>
@@ -101,47 +115,62 @@ export default function StartPage() {
       {/* Recommended Concepts */}
       <div>
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
-          Recommended Starting Points
+          {loading ? "Loading recommendations..." : levelLabels[recommendedLevel] || "Recommended Starting Points"}
         </h2>
-        <div className="grid sm:grid-cols-2 gap-4">
-          {recommendedConcepts.map((concept) => (
-            <button
-              key={concept.slug}
-              onClick={() => handleConceptClick(concept.slug)}
-              className="p-5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-left hover:border-zinc-400 dark:hover:border-zinc-600 hover:shadow-sm transition-all group"
-            >
-              <div className="flex items-start justify-between">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-zinc-700 dark:group-hover:text-zinc-200">
-                  {concept.name}
-                </h3>
-                <svg
-                  className="w-5 h-5 text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                  <polyline points="12 5 19 12 12 19" />
-                </svg>
+
+        {loading ? (
+          <div className="grid sm:grid-cols-2 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                className="p-5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 animate-pulse"
+              >
+                <div className="h-5 bg-zinc-200 dark:bg-zinc-700 rounded w-3/4 mb-2" />
+                <div className="h-4 bg-zinc-100 dark:bg-zinc-800 rounded w-full" />
               </div>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
-                {concept.description}
-              </p>
-            </button>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid sm:grid-cols-2 gap-4">
+            {recommendedConcepts.map((concept) => (
+              <button
+                key={concept.slug}
+                onClick={() => handleConceptClick(concept.slug)}
+                className="p-5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-left hover:border-zinc-400 dark:hover:border-zinc-600 hover:shadow-sm transition-all group"
+              >
+                <div className="flex items-start justify-between">
+                  <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 group-hover:text-zinc-700 dark:group-hover:text-zinc-200">
+                    {concept.name}
+                  </h3>
+                  <svg
+                    className="w-5 h-5 text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition-colors flex-shrink-0 ml-2"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                    <polyline points="12 5 19 12 12 19" />
+                  </svg>
+                </div>
+                <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
+                  {concept.description}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Or divider */}
       <div className="flex items-center gap-4 my-10">
-        <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800"></div>
+        <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800" />
         <span className="text-sm text-zinc-500 dark:text-zinc-400">
           or explore randomly
         </span>
-        <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800"></div>
+        <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800" />
       </div>
 
       {/* Random exploration */}
@@ -168,7 +197,18 @@ export default function StartPage() {
           Surprise me
         </button>
       </div>
+
+      {/* Retake onboarding link */}
+      {profile?.onboarding_complete && (
+        <div className="text-center mt-8">
+          <button
+            onClick={() => router.push("/onboarding")}
+            className="text-sm text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+          >
+            Retake onboarding quiz
+          </button>
+        </div>
+      )}
     </div>
   );
 }
-

@@ -1,8 +1,9 @@
 /**
  * Google Gemini Flash LLM Integration
  *
- * All LLM generation for lessons, dialogue, branches, and quizzes.
- * Uses Gemini Flash API with appropriate prompts from PROMPTS.md.
+ * LLM generation for lessons, dialogue, branches, and quiz questions.
+ * Quiz evaluation is algorithmic (no LLM call).
+ * Uses Gemini 1.5 Flash with JSON mode.
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
@@ -20,12 +21,25 @@ import type {
   QuizAnswer,
 } from "@/types";
 
-// Initialize Gemini client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+// Lazy initialization of Gemini client
+let genAI: GoogleGenerativeAI | null = null;
+
+function getGenAI(): GoogleGenerativeAI {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "GEMINI_API_KEY environment variable is required. Add it to .env.local"
+      );
+    }
+    genAI = new GoogleGenerativeAI(apiKey);
+  }
+  return genAI;
+}
 
 // Get the Gemini Flash model configured for JSON output
 function getModel() {
-  return genAI.getGenerativeModel({
+  return getGenAI().getGenerativeModel({
     model: "gemini-1.5-flash",
     generationConfig: {
       responseMimeType: "application/json",
@@ -420,55 +434,64 @@ Respond in JSON format:
 }
 
 /**
- * Evaluate quiz results to determine familiarity level
+ * Evaluate quiz results to determine familiarity level (algorithmic, not LLM-based)
+ *
+ * Scoring: incorrect=0, beginner=1, intermediate=2, advanced=3
+ * Thresholds: avg < 1.0 → beginner, avg < 2.0 → intermediate, avg >= 2.0 → advanced
  */
-export async function evaluateQuizResult(
-  category: string,
-  subtopic: string,
+export function evaluateQuizResult(
   answers: QuizAnswer[]
-): Promise<QuizEvaluationGeneration | null> {
-  const model = getModel();
+): QuizEvaluationGeneration {
+  const levelScores: Record<string, number> = {
+    incorrect: 0,
+    beginner: 1,
+    intermediate: 2,
+    advanced: 3,
+  };
 
-  const qaPairs = formatQuizAnswers(answers);
-
-  const prompt = `You are evaluating quiz responses to determine philosophical familiarity. Be fair but honest in your assessment.
-
-Based on the following quiz responses, determine the user's familiarity with "${subtopic}" (within ${category}):
-
-Questions and answers:
-${qaPairs}
-
-Evaluate and assign a familiarity level: "beginner", "intermediate", or "advanced"
-
-Consider:
-- Consistency of responses
-- The sophistication of understanding demonstrated
-- When in doubt, err slightly toward the lower level (better to pleasantly surprise than overwhelm)
-
-Respond in JSON format:
-{
-  "familiarity": "beginner" | "intermediate" | "advanced",
-  "reasoning": "Brief explanation of the assessment"
-}`;
-
-  try {
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    const parsed = parseJsonResponse<{
-      familiarity: string;
-      reasoning: string;
-    }>(text);
-    if (parsed) {
-      return {
-        familiarity: parsed.familiarity as FamiliarityLevel,
-        reasoning: parsed.reasoning,
-      };
-    }
-    return null;
-  } catch (error) {
-    console.error("Error evaluating quiz result:", error);
-    return null;
+  if (answers.length === 0) {
+    return {
+      familiarity: "beginner",
+      reasoning: "No answers provided; defaulting to beginner level.",
+    };
   }
+
+  // Calculate score
+  const totalScore = answers.reduce(
+    (sum, a) => sum + (levelScores[a.level] ?? 0),
+    0
+  );
+  const avgScore = totalScore / answers.length;
+
+  // Count answer types for reasoning
+  const counts = answers.reduce(
+    (acc, a) => {
+      acc[a.level] = (acc[a.level] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>
+  );
+
+  // Determine familiarity level
+  let familiarity: FamiliarityLevel;
+  if (avgScore < 1.0) {
+    familiarity = "beginner";
+  } else if (avgScore < 2.0) {
+    familiarity = "intermediate";
+  } else {
+    familiarity = "advanced";
+  }
+
+  // Generate reasoning
+  const parts: string[] = [];
+  if (counts.advanced) parts.push(`${counts.advanced} advanced`);
+  if (counts.intermediate) parts.push(`${counts.intermediate} intermediate`);
+  if (counts.beginner) parts.push(`${counts.beginner} beginner`);
+  if (counts.incorrect) parts.push(`${counts.incorrect} incorrect`);
+
+  const reasoning = `Based on ${answers.length} answers (${parts.join(", ")}), average score ${avgScore.toFixed(1)}/3.0 indicates ${familiarity} familiarity.`;
+
+  return { familiarity, reasoning };
 }
 
 /**

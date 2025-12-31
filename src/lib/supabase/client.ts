@@ -1,6 +1,17 @@
 import { createBrowserClient } from '@supabase/ssr'
 import type { Database } from './types'
 
+// Validate env vars at module load
+if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+  throw new Error('NEXT_PUBLIC_SUPABASE_URL environment variable is required')
+}
+if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  throw new Error('NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable is required')
+}
+
+const SUPABASE_URL: string = process.env.NEXT_PUBLIC_SUPABASE_URL
+const SUPABASE_ANON_KEY: string = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
 let client: ReturnType<typeof createBrowserClient<Database>> | undefined
 
 /**
@@ -15,8 +26,8 @@ export function getSupabaseBrowserClient() {
   }
 
   client = createBrowserClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY
   )
 
   return client

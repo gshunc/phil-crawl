@@ -276,6 +276,34 @@ END;
 $$;
 
 
+-- Increment nodes explored and check if graph should be unlocked (atomic)
+CREATE OR REPLACE FUNCTION public.increment_nodes_explored(
+  p_user_id UUID
+)
+RETURNS TABLE (
+  nodes_explored INTEGER,
+  graph_unlocked BOOLEAN
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_nodes_explored INTEGER;
+  v_graph_unlocked BOOLEAN;
+BEGIN
+  UPDATE user_profiles
+  SET
+    nodes_explored = COALESCE(user_profiles.nodes_explored, 0) + 1,
+    graph_unlocked = COALESCE(user_profiles.graph_unlocked, FALSE) OR (COALESCE(user_profiles.nodes_explored, 0) + 1 >= 10)
+  WHERE id = p_user_id
+  RETURNING user_profiles.nodes_explored, user_profiles.graph_unlocked
+  INTO v_nodes_explored, v_graph_unlocked;
+
+  RETURN QUERY SELECT v_nodes_explored, v_graph_unlocked;
+END;
+$$;
+
+
 -- =============================================
 -- COMMENTS
 -- =============================================

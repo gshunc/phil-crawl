@@ -107,6 +107,7 @@ export async function getEdgesFromConcept(
 
 /**
  * Find nearest concepts using vector similarity search (pgvector)
+ * Uses the match_concepts SQL function defined in schema.sql
  */
 export async function findNearestConcepts(
   embedding: number[],
@@ -115,8 +116,6 @@ export async function findNearestConcepts(
 ): Promise<Concept[]> {
   const supabase = await getSupabaseServerClient();
 
-  // Use raw SQL for vector similarity search with cosine distance
-  // The <=> operator is the cosine distance operator in pgvector
   const { data, error } = await supabase.rpc("match_concepts", {
     query_embedding: embedding,
     match_threshold: 0.5,
@@ -124,25 +123,8 @@ export async function findNearestConcepts(
   });
 
   if (error) {
-    // If RPC doesn't exist, fall back to direct query
-    console.error("Error in findNearestConcepts RPC:", error);
-
-    // Alternative: Use direct query with proper casting
-    const { data: fallbackData, error: fallbackError } = await supabase
-      .from("concepts")
-      .select("*")
-      .not("embedding", "is", null)
-      .limit(limit * 2);
-
-    if (fallbackError) {
-      console.error("Fallback query also failed:", fallbackError);
-      return [];
-    }
-
-    // Filter out excluded IDs and limit results
-    return (fallbackData || [])
-      .filter((c) => !excludeIds.includes(c.id))
-      .slice(0, limit);
+    console.error("Error in findNearestConcepts:", error);
+    return [];
   }
 
   // Filter out excluded IDs
@@ -269,6 +251,7 @@ export async function createEdge(
 
 /**
  * Increment the branch choice counter for analytics
+ * Uses the increment_branch_stat SQL function defined in schema.sql (atomic upsert)
  */
 export async function incrementBranchStat(
   conceptId: string,
@@ -276,33 +259,13 @@ export async function incrementBranchStat(
 ): Promise<void> {
   const supabase = await getSupabaseServerClient();
 
-  // Try to increment existing record
-  const { error: updateError } = await supabase.rpc("increment_branch_stat", {
+  const { error } = await supabase.rpc("increment_branch_stat", {
     p_concept_id: conceptId,
     p_branch_type: branchType,
   });
 
-  if (updateError) {
-    // If RPC doesn't exist, do upsert manually
-    const { data: existing } = await supabase
-      .from("branch_analytics")
-      .select("*")
-      .eq("concept_id", conceptId)
-      .eq("branch_type", branchType)
-      .single();
-
-    if (existing) {
-      await supabase
-        .from("branch_analytics")
-        .update({ chosen_count: (existing.chosen_count || 0) + 1 })
-        .eq("id", existing.id);
-    } else {
-      await supabase.from("branch_analytics").insert({
-        concept_id: conceptId,
-        branch_type: branchType,
-        chosen_count: 1,
-      });
-    }
+  if (error) {
+    console.error("Error incrementing branch stat:", error);
   }
 }
 
@@ -427,43 +390,26 @@ export async function getUserProfile(
 
 /**
  * Increment the nodes explored count and check if graph should be unlocked
+ * Uses the increment_nodes_explored SQL function defined in schema.sql (atomic)
  */
 export async function incrementNodesExplored(
   userId: string
 ): Promise<{ nodesExplored: number; graphUnlocked: boolean }> {
   const supabase = await getSupabaseServerClient();
 
-  // Get current count
-  const { data: profile, error: fetchError } = await supabase
-    .from("user_profiles")
-    .select("nodes_explored, graph_unlocked")
-    .eq("id", userId)
-    .single();
+  const { data, error } = await supabase.rpc("increment_nodes_explored", {
+    p_user_id: userId,
+  });
 
-  if (fetchError || !profile) {
-    console.error("Error fetching profile for increment:", fetchError);
+  if (error) {
+    console.error("Error incrementing nodes explored:", error);
     return { nodesExplored: 0, graphUnlocked: false };
   }
 
-  const newCount = (profile.nodes_explored || 0) + 1;
-  const shouldUnlock = newCount >= 10;
-
-  // Update the profile
-  const { error: updateError } = await supabase
-    .from("user_profiles")
-    .update({
-      nodes_explored: newCount,
-      graph_unlocked: shouldUnlock || profile.graph_unlocked,
-    })
-    .eq("id", userId);
-
-  if (updateError) {
-    console.error("Error updating nodes explored:", updateError);
-  }
-
+  const result = data?.[0];
   return {
-    nodesExplored: newCount,
-    graphUnlocked: shouldUnlock || profile.graph_unlocked || false,
+    nodesExplored: result?.nodes_explored ?? 0,
+    graphUnlocked: result?.graph_unlocked ?? false,
   };
 }
 

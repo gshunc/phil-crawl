@@ -288,6 +288,15 @@ export interface Database {
         };
         Returns: undefined;
       };
+      increment_nodes_explored: {
+        Args: {
+          p_user_id: string;
+        };
+        Returns: {
+          nodes_explored: number;
+          graph_unlocked: boolean;
+        }[];
+      };
     };
     Enums: {
       [_ in never]: never;

@@ -7,6 +7,17 @@
 
 import type { Video } from "@/types";
 
+// Lazy API key getter
+function getApiKey(): string {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "YOUTUBE_API_KEY environment variable is required. Add it to .env.local"
+    );
+  }
+  return apiKey;
+}
+
 const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
 
 interface YouTubeSearchItem {
@@ -46,28 +57,30 @@ export async function searchVideos(
     duration?: "short" | "medium" | "long";
   } = {}
 ): Promise<Video[]> {
-  const apiKey = process.env.YOUTUBE_API_KEY;
+  const { maxResults = 5, duration } = options;
 
-  if (!apiKey) {
-    console.error("YOUTUBE_API_KEY not configured");
-    return [];
-  }
-
-  const { maxResults = 5, duration = "medium" } = options;
+  // Only append "philosophy" if not already in query
+  const searchQuery = query.toLowerCase().includes("philosophy")
+    ? query
+    : `${query} philosophy`;
 
   // Build search URL with parameters
   const params = new URLSearchParams({
-    key: apiKey,
+    key: getApiKey(),
     part: "snippet",
     type: "video",
-    q: `${query} philosophy`,
+    q: searchQuery,
     maxResults: String(maxResults * 2), // Fetch extra for filtering
     order: "relevance",
-    videoDuration: duration,
     relevanceLanguage: "en",
     safeSearch: "moderate",
     videoEmbeddable: "true",
   });
+
+  // Only filter by duration if specified
+  if (duration) {
+    params.set("videoDuration", duration);
+  }
 
   try {
     const response = await fetch(`${YOUTUBE_API_BASE}/search?${params}`);
@@ -79,6 +92,10 @@ export async function searchVideos(
     }
 
     const data: YouTubeSearchResponse = await response.json();
+
+    if (!data.items || data.items.length === 0) {
+      return [];
+    }
 
     // Transform and filter results
     const videos: Video[] = data.items
@@ -124,48 +141,4 @@ export async function searchVideos(
     console.error("Error searching YouTube:", error);
     return [];
   }
-}
-
-/**
- * Search for both medium and long-form philosophy videos.
- * Combines results from two searches to get a mix of explainers and lectures.
- *
- * @param query - Search query
- * @param maxResults - Maximum total results to return
- * @returns Array of video results
- */
-export async function searchPhilosophyVideos(
-  query: string,
-  maxResults: number = 5
-): Promise<Video[]> {
-  // Run parallel searches for medium and long videos
-  const [mediumVideos, longVideos] = await Promise.all([
-    searchVideos(query, {
-      maxResults: Math.ceil(maxResults / 2),
-      duration: "medium",
-    }),
-    searchVideos(query, {
-      maxResults: Math.floor(maxResults / 2),
-      duration: "long",
-    }),
-  ]);
-
-  // Interleave results: medium, long, medium, long...
-  const combined: Video[] = [];
-  const maxLength = Math.max(mediumVideos.length, longVideos.length);
-
-  for (let i = 0; i < maxLength; i++) {
-    if (i < mediumVideos.length) combined.push(mediumVideos[i]);
-    if (i < longVideos.length) combined.push(longVideos[i]);
-  }
-
-  // Deduplicate by video ID
-  const seen = new Set<string>();
-  const deduplicated = combined.filter((video) => {
-    if (seen.has(video.videoId)) return false;
-    seen.add(video.videoId);
-    return true;
-  });
-
-  return deduplicated.slice(0, maxResults);
 }

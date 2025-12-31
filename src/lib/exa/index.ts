@@ -10,8 +10,21 @@
 import Exa from "exa-js";
 import type { Book } from "@/types";
 
-// Initialize Exa client
-const exa = new Exa(process.env.EXA_API_KEY);
+// Lazy initialization of Exa client
+let exa: Exa | null = null;
+
+function getExa(): Exa {
+  if (!exa) {
+    const apiKey = process.env.EXA_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "EXA_API_KEY environment variable is required. Add it to .env.local"
+      );
+    }
+    exa = new Exa(apiKey);
+  }
+  return exa;
+}
 
 // Preferred book retailer domains (in order of preference)
 const BOOK_DOMAINS = ["bookshop.org", "goodreads.com", "amazon.com"];
@@ -86,15 +99,14 @@ export async function searchBooks(
   query: string,
   maxResults: number = 6
 ): Promise<Book[]> {
-  if (!process.env.EXA_API_KEY) {
-    console.error("EXA_API_KEY not configured");
-    return [];
-  }
-
   try {
+    // Only append "philosophy" if not already in query
+    const searchQuery = query.toLowerCase().includes("philosophy")
+      ? `${query} book`
+      : `${query} philosophy book`;
+
     // Search with neural (semantic) search
-    // exa-js 2.0+ uses contents option with text/highlights/summary
-    const response = await exa.search(`${query} philosophy book`, {
+    const response = await getExa().search(searchQuery, {
       type: "neural",
       numResults: maxResults * 3, // Fetch extra for filtering
       includeDomains: BOOK_DOMAINS,
@@ -157,14 +169,13 @@ export async function searchArticles(
   query: string,
   maxResults: number = 5
 ): Promise<{ title: string; url: string; description: string }[]> {
-  if (!process.env.EXA_API_KEY) {
-    console.error("EXA_API_KEY not configured");
-    return [];
-  }
-
   try {
-    // exa-js 2.0+ uses contents option
-    const response = await exa.search(`${query} philosophy`, {
+    // Only append "philosophy" if not already in query
+    const searchQuery = query.toLowerCase().includes("philosophy")
+      ? query
+      : `${query} philosophy`;
+
+    const response = await getExa().search(searchQuery, {
       type: "neural",
       numResults: maxResults,
       includeDomains: [
