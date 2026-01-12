@@ -26,10 +26,11 @@ let genAI: GoogleGenerativeAI | null = null;
 
 function getGenAI(): GoogleGenerativeAI {
   if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    // Support both GEMINI_API_KEY and GOOGLE_AI_API_KEY
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
     if (!apiKey) {
       throw new Error(
-        "GEMINI_API_KEY environment variable is required. Add it to .env.local"
+        "GEMINI_API_KEY or GOOGLE_AI_API_KEY environment variable is required. Add it to .env.local"
       );
     }
     genAI = new GoogleGenerativeAI(apiKey);
@@ -40,7 +41,7 @@ function getGenAI(): GoogleGenerativeAI {
 // Get the Gemini Flash model configured for JSON output
 function getModel() {
   return getGenAI().getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-3-flash-preview",
     generationConfig: {
       responseMimeType: "application/json",
       temperature: 0.7,
@@ -464,13 +465,10 @@ export function evaluateQuizResult(
   const avgScore = totalScore / answers.length;
 
   // Count answer types for reasoning
-  const counts = answers.reduce(
-    (acc, a) => {
-      acc[a.level] = (acc[a.level] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
+  const counts = answers.reduce((acc, a) => {
+    acc[a.level] = (acc[a.level] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
 
   // Determine familiarity level
   let familiarity: FamiliarityLevel;
@@ -489,7 +487,11 @@ export function evaluateQuizResult(
   if (counts.beginner) parts.push(`${counts.beginner} beginner`);
   if (counts.incorrect) parts.push(`${counts.incorrect} incorrect`);
 
-  const reasoning = `Based on ${answers.length} answers (${parts.join(", ")}), average score ${avgScore.toFixed(1)}/3.0 indicates ${familiarity} familiarity.`;
+  const reasoning = `Based on ${answers.length} answers (${parts.join(
+    ", "
+  )}), average score ${avgScore.toFixed(
+    1
+  )}/3.0 indicates ${familiarity} familiarity.`;
 
   return { familiarity, reasoning };
 }

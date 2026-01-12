@@ -2,6 +2,7 @@
  * Client-Side State Management (Zustand + Immer)
  *
  * Manages session-scoped state for:
+ * - Authentication state (user, profile, loading)
  * - Exploration path (stack of visited concepts)
  * - Go Deeper content cache (ephemeral, not persisted to DB)
  * - Visited nodes (for graph visualization)
@@ -14,6 +15,12 @@
 
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
+import { enableMapSet } from "immer";
+import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+
+// Enable Immer support for Set and Map
+enableMapSet();
+import type { User } from "@supabase/supabase-js";
 import type {
   DeeperCache,
   GraphNode,
@@ -23,7 +30,235 @@ import type {
   Book,
   Concept,
   EdgeWithTarget,
+  UserProfile,
 } from "@/types";
+
+// =============================================
+// AUTH STORE
+// =============================================
+
+interface AuthState {
+  /** Supabase auth user */
+  user: User | null;
+  /** User profile from database */
+  profile: UserProfile | null;
+  /** Loading state for auth operations */
+  loading: boolean;
+  /** Error message if any */
+  error: string | null;
+  /** Whether auth has been initialized */
+  initialized: boolean;
+  /** Set user */
+  setUser: (user: User | null) => void;
+  /** Set profile */
+  setProfile: (profile: UserProfile | null) => void;
+  /** Set loading state */
+  setLoading: (loading: boolean) => void;
+  /** Set error */
+  setError: (error: string | null) => void;
+  /** Mark as initialized */
+  setInitialized: (initialized: boolean) => void;
+  /** Reset auth state (for logout) */
+  reset: () => void;
+}
+
+export const useAuthStore = create<AuthState>()(
+  immer((set) => ({
+    user: null,
+    profile: null,
+    loading: true,
+    error: null,
+    initialized: false,
+
+    setUser: (user: User | null) => {
+      set((state) => {
+        state.user = user;
+      });
+    },
+
+    setProfile: (profile: UserProfile | null) => {
+      set((state) => {
+        state.profile = profile;
+      });
+    },
+
+    setLoading: (loading: boolean) => {
+      set((state) => {
+        state.loading = loading;
+      });
+    },
+
+    setError: (error: string | null) => {
+      set((state) => {
+        state.error = error;
+      });
+    },
+
+    setInitialized: (initialized: boolean) => {
+      set((state) => {
+        state.initialized = initialized;
+      });
+    },
+
+    reset: () => {
+      set((state) => {
+        state.user = null;
+        state.profile = null;
+        state.loading = false;
+        state.error = null;
+      });
+    },
+  }))
+);
+
+// =============================================
+// AUTH INITIALIZATION (singleton)
+// =============================================
+
+let authInitPromise: Promise<void> | null = null;
+
+/**
+ * Fetch user profile with timeout protection
+ */
+async function fetchProfileWithTimeout(
+  userId: string,
+  timeoutMs: number = 5000
+): Promise<UserProfile | null> {
+  const supabase = getSupabaseBrowserClient();
+
+  const fetchPromise = supabase
+    .from("user_profiles")
+    .select("*")
+    .eq("id", userId)
+    .single();
+
+  const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) => {
+    setTimeout(() => {
+      resolve({ data: null, error: { message: "Profile fetch timed out" } });
+    }, timeoutMs);
+  });
+
+  try {
+    const result = await Promise.race([fetchPromise, timeoutPromise]);
+    const { data, error } = result;
+
+    if (error && (error as { code?: string }).code !== "PGRST116") {
+      console.error("[AuthStore] Error fetching profile:", error);
+      return null;
+    }
+
+    if (!data) return null;
+
+    const row = data as {
+      id: string;
+      onboarding_complete: boolean | null;
+      nodes_explored: number | null;
+      graph_unlocked: boolean | null;
+      created_at: string | null;
+    };
+
+    return {
+      id: row.id,
+      onboarding_complete: row.onboarding_complete ?? false,
+      nodes_explored: row.nodes_explored ?? 0,
+      graph_unlocked: row.graph_unlocked ?? false,
+      created_at: row.created_at,
+    };
+  } catch (err) {
+    console.error("[AuthStore] Error fetching profile:", err);
+    return null;
+  }
+}
+
+/**
+ * Initialize auth state and set up listeners.
+ * This is called once and cached - safe to call multiple times.
+ */
+export function initializeAuth(): Promise<void> {
+  if (authInitPromise) {
+    return authInitPromise;
+  }
+
+  authInitPromise = (async () => {
+    const store = useAuthStore.getState();
+
+    // Already initialized, skip
+    if (store.initialized) {
+      return;
+    }
+
+    const supabase = getSupabaseBrowserClient();
+
+    console.log("[AuthStore] Starting auth initialization...");
+    store.setLoading(true);
+
+    // Set up auth state change listener FIRST
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log("[AuthStore] Auth state changed:", event, !!session?.user);
+        const currentStore = useAuthStore.getState();
+        const currentUser = session?.user ?? null;
+
+        currentStore.setUser(currentUser);
+
+        if (currentUser) {
+          const userProfile = await fetchProfileWithTimeout(currentUser.id);
+          currentStore.setProfile(userProfile);
+        } else {
+          currentStore.setProfile(null);
+        }
+
+        currentStore.setLoading(false);
+      }
+    );
+
+    // Store subscription for potential cleanup
+    if (typeof window !== "undefined") {
+      (window as unknown as { __authSubscription?: typeof subscription }).__authSubscription = subscription;
+    }
+
+    // Initial auth check with timeout
+    const timeoutId = setTimeout(() => {
+      console.warn("[AuthStore] Auth check timed out after 8s");
+      const currentStore = useAuthStore.getState();
+      if (!currentStore.initialized) {
+        currentStore.setLoading(false);
+        currentStore.setInitialized(true);
+      }
+    }, 8000);
+
+    try {
+      console.log("[AuthStore] Calling supabase.auth.getUser()...");
+      const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+
+      clearTimeout(timeoutId);
+
+      console.log("[AuthStore] getUser result:", {
+        user: !!currentUser,
+        userId: currentUser?.id,
+        error: userError,
+      });
+
+      store.setUser(currentUser);
+
+      if (currentUser) {
+        console.log("[AuthStore] Fetching profile for user:", currentUser.id);
+        const userProfile = await fetchProfileWithTimeout(currentUser.id);
+        console.log("[AuthStore] Profile result:", userProfile);
+        store.setProfile(userProfile);
+      }
+    } catch (err) {
+      clearTimeout(timeoutId);
+      console.error("[AuthStore] Error initializing auth:", err);
+    } finally {
+      console.log("[AuthStore] Auth initialization complete");
+      store.setLoading(false);
+      store.setInitialized(true);
+    }
+  })();
+
+  return authInitPromise;
+}
 
 // =============================================
 // EXPLORATION STORE

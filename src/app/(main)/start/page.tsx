@@ -27,25 +27,47 @@ export default function StartPage() {
   >([]);
   const [recommendedLevel, setRecommendedLevel] = useState<string>("beginner");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Fetch personalized recommendations
   useEffect(() => {
+    let mounted = true;
+
     async function fetchRecommendations() {
+      console.log("[StartPage] Fetching recommendations...");
       try {
         const response = await fetch("/api/onboarding/recommendations");
+        console.log("[StartPage] Response status:", response.status);
+
+        if (!mounted) return;
+
         if (response.ok) {
           const data = await response.json();
-          setRecommendedConcepts(data.concepts);
-          setRecommendedLevel(data.level);
+          console.log("[StartPage] Received data:", data);
+          setRecommendedConcepts(data.concepts || []);
+          setRecommendedLevel(data.level || "beginner");
+        } else {
+          const errorText = await response.text();
+          console.error("[StartPage] Error response:", errorText);
+          setError(`Failed to load recommendations: ${response.status}`);
         }
-      } catch (error) {
-        console.error("Error fetching recommendations:", error);
+      } catch (err) {
+        console.error("[StartPage] Fetch error:", err);
+        if (mounted) {
+          setError("Failed to connect to server");
+        }
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     }
 
     fetchRecommendations();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -115,7 +137,11 @@ export default function StartPage() {
       {/* Recommended Concepts */}
       <div>
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100 mb-4">
-          {loading ? "Loading recommendations..." : levelLabels[recommendedLevel] || "Recommended Starting Points"}
+          {loading
+            ? "Loading recommendations..."
+            : error
+              ? "Couldn't load recommendations"
+              : levelLabels[recommendedLevel] || "Recommended Starting Points"}
         </h2>
 
         {loading ? (

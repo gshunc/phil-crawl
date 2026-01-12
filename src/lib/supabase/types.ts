@@ -259,6 +259,40 @@ export interface Database {
           }
         ];
       };
+      user_explored_concepts: {
+        Row: {
+          id: string;
+          user_id: string;
+          concept_id: string;
+          explored_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          concept_id: string;
+          explored_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          concept_id?: string;
+          explored_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "user_explored_concepts_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "user_profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "user_explored_concepts_concept_id_fkey";
+            columns: ["concept_id"];
+            referencedRelation: "concepts";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
